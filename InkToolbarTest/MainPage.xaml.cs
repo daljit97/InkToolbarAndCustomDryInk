@@ -22,6 +22,9 @@ using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Controls.Primitives;
 using Windows.UI.Xaml.Media;
 using Windows.UI.Xaml.Navigation;
+using Windows.UI.Xaml.Input;
+using Windows.Devices.Input;
+using Windows.UI.Input;
 
 namespace InkToolbarTest
 {
@@ -51,6 +54,15 @@ namespace InkToolbarTest
         private float displayDpi;
         private IReadOnlyList<InkStroke> _pendingDry;
         #endregion
+
+        #region multi stylus support
+        // please  verify if for a non async method lock statement works on uwp as on desktop or not
+        //private AsyncLock _locker = new AsyncLock();
+
+        //used to store InkDraingAttribute of esch surface hub stylus
+        private Dictionary<int, InkDrawingAttributes> _stylusAttributes = new Dictionary<int, InkDrawingAttributes>();
+        #endregion
+        
 
         #region Constructors
         public MainPage()
@@ -146,11 +158,74 @@ namespace InkToolbarTest
             var maxSize = Math.Max(CanvasContainer.Width, CanvasContainer.Height);
             ScrollViewer.MaxZoomFactor = MaxImageSize / System.Convert.ToSingle(maxSize);
 
+
+            #region multi stylus support
+            // Set supported inking device types.
+            InkCanvas.InkPresenter.InputDeviceTypes = Windows.UI.Core.CoreInputDeviceTypes.Pen;
+
+            // Phase 1: we need to discover the three user clicks with pen on the toolbar, we store only the unique stylus id (into Dictionary<int, InkDrawingAttributes> _stylusAttributes) and no InkDrawingAttributes because at this time user has still 
+            // not choosen the tool and color. So in that phase we do have an entry on the _stylusAttributes with a key but with a null value
+            
+            // get reference to inktoolbar buttons
+            InkToolbarBallpointPenButton penButton = InkToolbar.GetToolButton(InkToolbarTool.BallpointPen) as InkToolbarBallpointPenButton;
+            InkToolbarHighlighterButton highlighterButton = InkToolbar.GetToolButton(InkToolbarTool.Highlighter) as InkToolbarHighlighterButton;
+            InkToolbarPencilButton pencilButton = InkToolbar.GetToolButton(InkToolbarTool.Pencil) as InkToolbarPencilButton;
+
+            // subscribing to inktoolbar button events
+            // TODO: unsubscribe to all those events
+            if (penButton != null)
+            {
+                Flyout buttonlFlyout = FlyoutBase.GetAttachedFlyout(penButton) as Flyout;
+                if (buttonlFlyout != null)
+                {
+                    var configControl = buttonlFlyout.Content as InkToolbarPenConfigurationControl;
+
+                    if (configControl != null)
+                        configControl.PointerExited += ConfigControl_PointerExited;
+                }
+            }
+
+            // TODO: unsubscribe to all those events
+            if (highlighterButton != null)
+            {
+                Flyout buttonlFlyout = FlyoutBase.GetAttachedFlyout(highlighterButton) as Flyout;
+                if (buttonlFlyout != null)
+                {
+                    var configControl = buttonlFlyout.Content as InkToolbarPenConfigurationControl;
+
+                    if (configControl != null)
+                        configControl.PointerExited += ConfigControl_PointerExited;
+                }
+            }
+
+            // TODO: unsubscribe to all those events
+            if (pencilButton != null)
+            {
+                Flyout buttonlFlyout = FlyoutBase.GetAttachedFlyout(pencilButton) as Flyout;
+                if (buttonlFlyout != null)
+                {
+                    var configControl = buttonlFlyout.Content as InkToolbarPenConfigurationControl;
+
+                    if (configControl != null)
+                        configControl.PointerExited += ConfigControl_PointerExited;
+                }
+            }
+
+            // Phase 1 (ConfigControl_PointerExited): Every time user select (or not) a new property we sotre it for its own unique stylus id
+            // Phase 2 (unprocessedInput.PointerHovered): when the user starts inking just a moment before the ink starts we get the unique stylus id from the PointerHovered
+            // we look into _stylusAttributes for the InkDrawingAttributes of that stylus and we apply to the InkCanvas.InkPresenter.UpdateDefaultDrawingAttributes
+            #endregion
+
+
             // 1. Activate custom drawing 
             _inkSynchronizer = InkCanvas.InkPresenter.ActivateCustomDrying();
+            
+            InkCanvas.InkPresenter.SetPredefinedConfiguration(InkPresenterPredefinedConfiguration.SimpleMultiplePointer);
+
 
             // 2. add use custom drawing when strokes are collected
             InkCanvas.InkPresenter.StrokesCollected += InkPresenter_StrokesCollected;
+
 
             // 3. Get the eraser button to handle custom dry ink and replace the erase all button with new logic
             var eraser = InkToolbar.GetToolButton(InkToolbarTool.Eraser) as InkToolbarEraserButton;
@@ -169,6 +244,7 @@ namespace InkToolbarTest
             unprocessedInput.PointerReleased += UnprocessedInput_PointerReleased;
             unprocessedInput.PointerExited += UnprocessedInput_PointerExited;
             unprocessedInput.PointerLost += UnprocessedInput_PointerLost;
+            unprocessedInput.PointerHovered += UnprocessedInput_PointerHovered;
 
             _eraseAllFlyout = FlyoutBase.GetAttachedFlyout(eraser) as Flyout;
 
@@ -187,6 +263,78 @@ namespace InkToolbarTest
                 }
             }
         }
+
+        #region multi stylus support
+
+        // Phase 1:
+        // Every time user select (or not) a new property we sotre it for its own unique stylus id
+        private void ConfigControl_PointerExited(object sender, PointerRoutedEventArgs e)
+        {
+            int uniqueStylusId = GetUniqueStylusId(PointerPoint.GetCurrentPoint(e.Pointer.PointerId));
+            //using (var releaser = await _locker.LockAsync())
+            //{
+                // if user is selecting the inktoolbar with a stylusu where a DrawingAttributes was already associated with, we delete that object
+                // so that _stylusAttributes we have the uniqueStylusId but not the DrawingAttributes that will be added on Phase 2
+                // if it was the first time we just add to the _stylusAttributes the uniqueStylusId
+                if (_stylusAttributes.ContainsKey(uniqueStylusId))
+                    _stylusAttributes[uniqueStylusId] = InkCanvas.InkPresenter.CopyDefaultDrawingAttributes();
+                else
+                    _stylusAttributes.Add(uniqueStylusId, InkCanvas.InkPresenter.CopyDefaultDrawingAttributes());
+            //}
+
+            Debug.WriteLine($"ConfigControl_PointerEntered Unique Stylus Id: {uniqueStylusId}");
+        }
+
+        // Phase 2: 
+        // this method need to be super veloce because this happens, we have the chance to change the color but the inking will start even this isn't finished
+        // so it can happens that if two stylust start exactly at the same time inking one of the two whon't have it's own DrawingAttributes stored in _stylusAttributes
+        // because the ininkg process has started and we din't changed the DrawingAttributes 
+        private void UnprocessedInput_PointerHovered(InkUnprocessedInput sender, PointerEventArgs e)
+        {
+            int uniqueStylusId = GetUniqueStylusId(e.CurrentPoint);
+
+            //using (var releaser = await _locker.LockAsync())
+            //{
+                // if stylus is present on the _stylusAttributes it means user has tapped with pen at last once on the ink toolbar
+                // if didn't and starts inking deirectly or no InkAttribute was selected we copy the actual InkCanvas' DefaultDrawingAttributes
+                // for that stylus so in a second user select a different tool/color on the inktoolbar ink of the forst stylus remain unchanged
+                if (_stylusAttributes.ContainsKey(uniqueStylusId) && _stylusAttributes[uniqueStylusId] != null)
+                    InkCanvas.InkPresenter.UpdateDefaultDrawingAttributes(_stylusAttributes[uniqueStylusId]);
+                else
+                {
+                    Debug.WriteLine($"PointerHovered Unique Stylus Id: {uniqueStylusId} DefaultDrawingAttributes not found!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+
+                    if (_stylusAttributes.ContainsKey(uniqueStylusId))
+                        _stylusAttributes[uniqueStylusId] = InkCanvas.InkPresenter.CopyDefaultDrawingAttributes();
+                    else
+                        _stylusAttributes.Add(uniqueStylusId, InkCanvas.InkPresenter.CopyDefaultDrawingAttributes());
+                }
+            //    await Task.Delay(TimeSpan.FromMilliseconds(500));
+            //}
+
+            //Debug.WriteLine($"{Guid.NewGuid()} PointerHovered Unique Stylus Id: {uniqueStylusId}");
+        }
+
+        private const int UNIQUE_STYLUS_ID_NOT_PRESENT = -1;
+        private const uint WIRELESS_ID_USAGE_PAGE = 0x0D;
+        private const uint WIRELESS_ID_USAGE = 0x5B;
+        private int GetUniqueStylusId(PointerPoint point)
+        {
+            int retVal = UNIQUE_STYLUS_ID_NOT_PRESENT;
+
+            try
+            {
+                if (point.Properties.HasUsage(WIRELESS_ID_USAGE_PAGE, WIRELESS_ID_USAGE))
+                    retVal = point.Properties.GetUsageValue(WIRELESS_ID_USAGE_PAGE, WIRELESS_ID_USAGE);
+            }
+            catch(Exception ex)
+            {
+                //Todo log exception
+                retVal = UNIQUE_STYLUS_ID_NOT_PRESENT;
+            }
+            return retVal;
+        }
+        #endregion 
 
         /// <summary>
         /// Update the Scroll Viewer when the DPI changes
@@ -239,6 +387,8 @@ namespace InkToolbarTest
 
         private void UnprocessedInput_PointerMoved(InkUnprocessedInput sender, PointerEventArgs args)
         {
+            Debug.WriteLine("UnprocessedInput_PointerMoved");
+
             if (!_isErasing)
             {
                 return;
