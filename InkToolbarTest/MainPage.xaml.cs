@@ -175,6 +175,7 @@ namespace InkToolbarTest
             // TODO: unsubscribe to all those events
             if (penButton != null)
             {
+                penButton.PointerExited += ConfigControl_PointerExited;
                 Flyout buttonlFlyout = FlyoutBase.GetAttachedFlyout(penButton) as Flyout;
                 if (buttonlFlyout != null)
                 {
@@ -188,6 +189,7 @@ namespace InkToolbarTest
             // TODO: unsubscribe to all those events
             if (highlighterButton != null)
             {
+                highlighterButton.PointerExited += ConfigControl_PointerExited;
                 Flyout buttonlFlyout = FlyoutBase.GetAttachedFlyout(highlighterButton) as Flyout;
                 if (buttonlFlyout != null)
                 {
@@ -201,6 +203,7 @@ namespace InkToolbarTest
             // TODO: unsubscribe to all those events
             if (pencilButton != null)
             {
+                pencilButton.PointerExited += ConfigControl_PointerExited;
                 Flyout buttonlFlyout = FlyoutBase.GetAttachedFlyout(pencilButton) as Flyout;
                 if (buttonlFlyout != null)
                 {
