@@ -1,45 +1,106 @@
-﻿<Page
-    x:Class="InkToolbarTest.MainPage"
-    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:canvas="using:Microsoft.Graphics.Canvas.UI.Xaml"
-    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    mc:Ignorable="d">
+﻿<Page x:Class="InkToolbarTest.MainPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:canvas="using:Microsoft.Graphics.Canvas.UI.Xaml"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      mc:Ignorable="d">
     <Page.Resources>
-        <Style TargetType="ScrollViewer" x:Key="ZoomableScrollViewer">
-            <Setter Property="ZoomMode" Value="Enabled"/>
-            <Setter Property="HorizontalScrollMode" Value="Enabled"/>
-            <Setter Property="VerticalScrollMode" Value="Enabled"/>
-            <Setter Property="HorizontalScrollBarVisibility" Value="Auto"/>
-            <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+        <Style TargetType="ScrollViewer"
+               x:Key="ZoomableScrollViewer">
+            <Setter Property="ZoomMode"
+                    Value="Enabled" />
+            <Setter Property="HorizontalScrollMode"
+                    Value="Enabled" />
+            <Setter Property="VerticalScrollMode"
+                    Value="Enabled" />
+            <Setter Property="HorizontalScrollBarVisibility"
+                    Value="Auto" />
+            <Setter Property="VerticalScrollBarVisibility"
+                    Value="Auto" />
             <!-- The CanvasControl renders to a bitmap with a maximum size of 16384 pixels per size - 
                 for more zooming capabilities, use the CanvasVirtualControl -->
-            <Setter Property="MaxZoomFactor" Value="5.4613"/>
+            <Setter Property="MaxZoomFactor"
+                    Value="5.4613" />
         </Style>
-        <Style TargetType="InkToolbarCustomToolButton" x:Key="ShareButtonStyle">
-            <Setter Property="Content" Value=""/>
-            <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
-            <Setter Property="ToolTipService.ToolTip" Value="Share"/>
+        <Style TargetType="InkToolbarCustomToolButton"
+               x:Key="ShareButtonStyle">
+            <Setter Property="Content"
+                    Value="" />
+            <Setter Property="FontFamily"
+                    Value="Segoe MDL2 Assets" />
+            <Setter Property="ToolTipService.ToolTip"
+                    Value="Share" />
+        </Style>
+        <Style TargetType="InkToolbarCustomToolButton"
+               x:Key="LassoButtonStyle">
+            <Setter Property="Content"
+                    Value="" />
+            <Setter Property="FontFamily"
+                    Value="Segoe MDL2 Assets" />
+            <Setter Property="ToolTipService.ToolTip"
+                    Value="Lasso" />
         </Style>
         <Style TargetType="InkToolbar">
-            <Setter Property="VerticalAlignment" Value="Top"/>
-            <Setter Property="HorizontalAlignment" Value="Right"/>
+            <Setter Property="VerticalAlignment"
+                    Value="Top" />
+            <Setter Property="HorizontalAlignment"
+                    Value="Right" />
         </Style>
-        <Style TargetType="Grid" x:Key="CanvasContainerStyle">
-            <Setter Property="Width" Value="3000"/>
-            <Setter Property="Height" Value="2000"/>
+        <Style TargetType="Grid"
+               x:Key="CanvasContainerStyle">
+            <Setter Property="Width"
+                    Value="3000" />
+            <Setter Property="Height"
+                    Value="2000" />
         </Style>
     </Page.Resources>
-    <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}" x:Name="ContentRoot">
-        <ScrollViewer x:Name="ScrollViewer" Style="{StaticResource ZoomableScrollViewer}" ViewChanged="OnScrollViewerViewChanged">
-            <Grid Style="{StaticResource CanvasContainerStyle}" x:Name="CanvasContainer">
-                <canvas:CanvasControl Draw="DrawCanvas" ClearColor="Beige" x:Name="DrawingCanvas"/>
-                <InkCanvas x:Name="InkCanvas"/>
+    <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+          x:Name="ContentRoot">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition />
+        </Grid.RowDefinitions>
+        <StackPanel HorizontalAlignment="Left"
+                    Orientation="Horizontal">
+            <InkToolbar TargetInkCanvas="{x:Bind InkCanvas}"
+                        x:Name="InkToolbar">
+                <InkToolbarCustomToolButton Style="{StaticResource ShareButtonStyle}"
+                                            Click="OnShare" />
+            </InkToolbar>
+            <InkToolbarCustomPenButton Content="L"
+                                       Checked="OnLassoChecked"
+                                       Unchecked="OnLassoUnchecked" />
+            <StackPanel x:Name="InkSelectionToolbar"
+                        Visibility="Collapsed"
+                        Orientation="Horizontal">
+                <Button Content="Copy"
+                        x:Name="Copy"
+                        Click="OnInkToolbarAction" />
+                <Button Content="Cut"
+                        x:Name="Cut"
+                        Click="OnInkToolbarAction" />
+                <Button Content="Paste"
+                        x:Name="Paste"
+                        Click="OnInkToolbarAction" />
+                <Button Content="Delete"
+                        x:Name="Delete"
+                        Click="OnInkToolbarAction" />
+            </StackPanel>
+        </StackPanel>
+        <ScrollViewer x:Name="ScrollViewer"
+                      Grid.Row="1"
+                      Style="{StaticResource ZoomableScrollViewer}"
+                      ViewChanged="OnScrollViewerViewChanged">
+            <Grid Style="{StaticResource CanvasContainerStyle}"
+                  x:Name="CanvasContainer">
+                <canvas:CanvasControl Draw="OnDraw"
+                                      ClearColor="Beige"
+                                      x:Name="canvas" />
+                <Canvas x:Name="SelectionCanvas" />
+                <InkCanvas x:Name="InkCanvas" />
             </Grid>
         </ScrollViewer>
-        <InkToolbar TargetInkCanvas="{x:Bind InkCanvas}" x:Name="InkToolbar">
-            <InkToolbarCustomToolButton Style="{StaticResource ShareButtonStyle}" Click="OnShare" />
-        </InkToolbar>
+
     </Grid>
 </Page>
