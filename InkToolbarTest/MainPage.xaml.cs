@@ -50,17 +50,8 @@ namespace InkToolbarTest
 
 		#region Fields
 		private readonly List<InkStrokeContainer> strokes = new List<InkStrokeContainer>();
-
-		private Flyout _eraseAllFlyout;
-
-		private InkSynchronizer _inkSynchronizer;
-
-		private bool _isErasing;
-
-		private Point _lastPoint;
-
-		private int _deferredDryDelay;
-
+		private Flyout eraseAllFlyout;
+		private InkSynchronizer inkSynchronizer;
 		private float displayDpi;
 		private ToolbarMode toolbarMode;
 		#endregion
@@ -70,7 +61,8 @@ namespace InkToolbarTest
 		//private AsyncLock _locker = new AsyncLock();
 
 		//used to store InkDraingAttribute of esch surface hub stylus
-		private Dictionary<int, InkDrawingAttributes> _stylusAttributes = new Dictionary<int, InkDrawingAttributes>();
+		private readonly Dictionary<int, InkDrawingAttributes> stylusAttributes = new Dictionary<int, InkDrawingAttributes>(); 
+
 		private IReadOnlyList<InkStroke> pendingDry;
 		private readonly List<InkStroke> renderedStrokes = new List<InkStroke>();
 		private int deferredDryDelay;
@@ -84,6 +76,9 @@ namespace InkToolbarTest
 		private Polyline lasso;
 		private bool isBoundRect;
 		private bool hasPasted;
+		private InkStrokeContainer copyContainer;
+		private int activePointerId;
+		private Point toolbarPosition;
 
 		#endregion
 
@@ -119,9 +114,9 @@ namespace InkToolbarTest
 
 		private async void MainPage_DataRequested(DataTransferManager sender, DataRequestedEventArgs args)
 		{
-			
+
 		}
-		
+
 
 		private void MainPage_Loaded(object sender, RoutedEventArgs e)
 		{
@@ -151,44 +146,26 @@ namespace InkToolbarTest
 			// TODO: unsubscribe to all those events
 			if (penButton != null)
 			{
-				penButton.PointerExited += ConfigControl_PointerExited;
-				Flyout buttonlFlyout = FlyoutBase.GetAttachedFlyout(penButton) as Flyout;
-				if (buttonlFlyout != null)
-				{
-					var configControl = buttonlFlyout.Content as InkToolbarPenConfigurationControl;
-
-					if (configControl != null)
-						configControl.PointerExited += ConfigControl_PointerExited;
-				}
+				penButton.PointerEntered += this.OnConfigButtonPointerEntered;
+				penButton.Click += this.OnPenButtonClicked;
 			}
 
 			// TODO: unsubscribe to all those events
 			if (highlighterButton != null)
 			{
-				highlighterButton.PointerExited += ConfigControl_PointerExited;
-				Flyout buttonlFlyout = FlyoutBase.GetAttachedFlyout(highlighterButton) as Flyout;
-				if (buttonlFlyout != null)
-				{
-					var configControl = buttonlFlyout.Content as InkToolbarPenConfigurationControl;
-
-					if (configControl != null)
-						configControl.PointerExited += ConfigControl_PointerExited;
-				}
+				highlighterButton.PointerEntered += this.OnConfigButtonPointerEntered;
+				highlighterButton.Click += this.OnPenButtonClicked;
 			}
 
 			// TODO: unsubscribe to all those events
 			if (pencilButton != null)
 			{
-				pencilButton.PointerExited += ConfigControl_PointerExited;
-				Flyout buttonlFlyout = FlyoutBase.GetAttachedFlyout(pencilButton) as Flyout;
-				if (buttonlFlyout != null)
-				{
-					var configControl = buttonlFlyout.Content as InkToolbarPenConfigurationControl;
-
-					if (configControl != null)
-						configControl.PointerExited += ConfigControl_PointerExited;
-				}
+				pencilButton.PointerEntered += this.OnConfigButtonPointerEntered;
+				pencilButton.Click += this.OnPenButtonClicked;
 			}
+
+			this.InkToolbar.ActiveToolChanged += this.OnActiveToolbarToolChanged;
+			this.InkToolbar.InkDrawingAttributesChanged += this.OnToolbarAttributesChanged;
 
 			// Phase 1 (ConfigControl_PointerExited): Every time user select (or not) a new property we sotre it for its own unique stylus id
 			// Phase 2 (unprocessedInput.PointerHovered): when the user starts inking just a moment before the ink starts we get the unique stylus id from the PointerHovered
@@ -197,7 +174,7 @@ namespace InkToolbarTest
 
 
 			// 1. Activate custom drawing 
-			_inkSynchronizer = InkCanvas.InkPresenter.ActivateCustomDrying();
+			this.inkSynchronizer = InkCanvas.InkPresenter.ActivateCustomDrying();
 
 			InkCanvas.InkPresenter.SetPredefinedConfiguration(InkPresenterPredefinedConfiguration.SimpleMultiplePointer);
 
@@ -225,11 +202,11 @@ namespace InkToolbarTest
 			unprocessedInput.PointerLost += UnprocessedInput_PointerLost;
 			unprocessedInput.PointerHovered += UnprocessedInput_PointerHovered;
 
-			_eraseAllFlyout = FlyoutBase.GetAttachedFlyout(eraser) as Flyout;
+			this.eraseAllFlyout = FlyoutBase.GetAttachedFlyout(eraser) as Flyout;
 
-			if (_eraseAllFlyout != null)
+			if (this.eraseAllFlyout != null)
 			{
-				var button = _eraseAllFlyout.Content as Button;
+				var button = this.eraseAllFlyout.Content as Button;
 
 				if (button != null)
 				{
@@ -238,8 +215,29 @@ namespace InkToolbarTest
 					newButton.Content = button.Content;
 
 					newButton.Click += EraseAllInk;
-					_eraseAllFlyout.Content = newButton;
+					this.eraseAllFlyout.Content = newButton;
 				}
+			}
+
+			this.InkCanvas.Holding += this.OnHolding;
+		}
+
+		private void OnHolding(object sender, HoldingRoutedEventArgs e)
+		{
+			base.OnHolding(e);
+			if (e.HoldingState == HoldingState.Started)
+			{
+				this.ShowInkSelectionToolbar();
+			}
+		}
+
+		private void ShowInkSelectionToolbar()
+		{
+			bool isSelectionActive = this.selectionRectangle != null;
+			bool canPaste = this.copyContainer != null && this.copyContainer.CanPasteFromClipboard();
+			if (isSelectionActive || canPaste)
+			{
+				this.InkSelectionToolbar.Visibility=Visibility.Visible;
 			}
 		}
 
@@ -247,21 +245,9 @@ namespace InkToolbarTest
 
 		// Phase 1:
 		// Every time user select (or not) a new property we sotre it for its own unique stylus id
-		private void ConfigControl_PointerExited(object sender, PointerRoutedEventArgs e)
+		private void OnConfigButtonPointerEntered(object sender, PointerRoutedEventArgs e)
 		{
-			int uniqueStylusId = GetUniqueStylusId(PointerPoint.GetCurrentPoint(e.Pointer.PointerId));
-			//using (var releaser = await _locker.LockAsync())
-			//{
-			// if user is selecting the inktoolbar with a stylusu where a DrawingAttributes was already associated with, we delete that object
-			// so that _stylusAttributes we have the uniqueStylusId but not the DrawingAttributes that will be added on Phase 2
-			// if it was the first time we just add to the _stylusAttributes the uniqueStylusId
-			if (_stylusAttributes.ContainsKey(uniqueStylusId))
-				_stylusAttributes[uniqueStylusId] = InkCanvas.InkPresenter.CopyDefaultDrawingAttributes();
-			else
-				_stylusAttributes.Add(uniqueStylusId, InkCanvas.InkPresenter.CopyDefaultDrawingAttributes());
-			//}
-
-			Debug.WriteLine($"ConfigControl_PointerEntered Unique Stylus Id: {uniqueStylusId}");
+			this.activePointerId = this.GetUniqueStylusId(PointerPoint.GetCurrentPoint(e.Pointer.PointerId));
 		}
 
 		// Phase 2: 
@@ -270,7 +256,41 @@ namespace InkToolbarTest
 		// because the ininkg process has started and we din't changed the DrawingAttributes 
 		private void UnprocessedInput_PointerHovered(InkUnprocessedInput sender, PointerEventArgs e)
 		{
-			
+			int uniqueStylusId = this.GetUniqueStylusId(e.CurrentPoint);
+			if (this.stylusAttributes.ContainsKey(uniqueStylusId) && this.stylusAttributes[uniqueStylusId] != null)
+			{
+				this.InkCanvas.InkPresenter.UpdateDefaultDrawingAttributes(this.stylusAttributes[uniqueStylusId]);
+			}
+			else
+			{
+				this.SetStylusAttributes(uniqueStylusId);
+			}
+
+		}
+
+		private void SetStylusAttributes(int uniqueStylusId)
+		{
+			if (this.InkCanvas != null)
+			{
+				if (this.stylusAttributes.ContainsKey(uniqueStylusId))
+				{
+					this.stylusAttributes[uniqueStylusId] = this.InkCanvas.InkPresenter.CopyDefaultDrawingAttributes();
+				}
+				else
+				{
+					this.stylusAttributes.Add(uniqueStylusId, this.InkCanvas.InkPresenter.CopyDefaultDrawingAttributes());
+				}
+			}
+		}
+
+		private void OnToolbarAttributesChanged(InkToolbar sender, object args)
+		{
+			this.SetStylusAttributes(this.activePointerId);
+		}
+
+		private void OnActiveToolbarToolChanged(InkToolbar sender, object args)
+		{
+			this.SetStylusAttributes(this.activePointerId);
 		}
 
 		private const int UNIQUE_STYLUS_ID_NOT_PRESENT = -1;
@@ -292,6 +312,11 @@ namespace InkToolbarTest
 			}
 			return retVal;
 		}
+		private void OnPenButtonClicked(object sender, RoutedEventArgs e)
+		{
+			this.ClearDrawnBoundingRect();
+			this.LassoButton.IsChecked = false;
+		}
 		#endregion
 
 		/// <summary>
@@ -309,37 +334,77 @@ namespace InkToolbarTest
 			OnScrollViewerViewChanged(null, null);
 		}
 
+		#region Erase
+
 		private void EraseAllInk(object sender, RoutedEventArgs e)
 		{
 			this.strokes.Clear();
 			this.canvas.Invalidate();
 
-			_eraseAllFlyout.Hide();
+			this.eraseAllFlyout.Hide();
 		}
 
 		private void Eraser_Checked(object sender, RoutedEventArgs e)
 		{
-			//var unprocessedInput = InkCanvas.InkPresenter.UnprocessedInput;
-			//unprocessedInput.PointerPressed += UnprocessedInput_PointerPressed;
-			//unprocessedInput.PointerMoved += UnprocessedInput_PointerMoved;
-			//unprocessedInput.PointerReleased += UnprocessedInput_PointerReleased;
-			//unprocessedInput.PointerExited += UnprocessedInput_PointerExited;
-			//unprocessedInput.PointerLost += UnprocessedInput_PointerLost;
-
-			InkCanvas.InkPresenter.InputProcessingConfiguration.Mode = InkInputProcessingMode.None;
+			this.toolbarMode = ToolbarMode.Erasing;
+			this.InkCanvas.InkPresenter.InputProcessingConfiguration.Mode = InkInputProcessingMode.None;
 		}
 
 		private void Eraser_Unchecked(object sender, RoutedEventArgs e)
 		{
-			//var unprocessedInput = InkCanvas.InkPresenter.UnprocessedInput;
+			this.toolbarMode = this.toolbarMode = ToolbarMode.Drawing;
+			this.InkCanvas.InkPresenter.InputProcessingConfiguration.Mode = InkInputProcessingMode.Inking;
+		}
 
-			//unprocessedInput.PointerPressed -= UnprocessedInput_PointerPressed;
-			//unprocessedInput.PointerMoved -= UnprocessedInput_PointerMoved;
-			//unprocessedInput.PointerReleased -= UnprocessedInput_PointerReleased;
-			//unprocessedInput.PointerExited -= UnprocessedInput_PointerExited;
-			//unprocessedInput.PointerLost -= UnprocessedInput_PointerLost;
+		private void OnEraserClicked(object sender, RoutedEventArgs e)
+		{
 
-			InkCanvas.InkPresenter.InputProcessingConfiguration.Mode = InkInputProcessingMode.Inking;
+			if (this.SelectionCanvas.Children.Any())
+			{
+				bool needRedraw = false;
+
+				List<InkStrokeContainer> tempStrokes = new List<InkStrokeContainer>();
+				foreach (InkStrokeContainer item in this.strokes.ToArray())
+				{
+					item.DeleteSelected();
+					if (item.GetStrokes().Any())
+					{
+						tempStrokes.Add(item);
+					}
+
+					needRedraw = true;
+				}
+
+				this.strokes.Clear();
+				this.strokes.AddRange(tempStrokes);
+				tempStrokes = null;
+
+				if (needRedraw)
+				{
+					this.canvas.Invalidate();
+					this.ClearDrawnBoundingRect();
+				}
+			}
+		}
+		#endregion
+
+		#region Lasso + copy/paste/delete
+
+		private void OnLassoChecked(object sender, RoutedEventArgs e)
+		{
+			if (!this.hasPasted)
+			{
+				this.ClearDrawnBoundingRect();
+			}
+
+
+			this.InkCanvas.InkPresenter.InputProcessingConfiguration.Mode = InkInputProcessingMode.None;
+			this.toolbarMode = ToolbarMode.Lasso;
+		}
+
+		private void OnLassoUnchecked(object sender, RoutedEventArgs e)
+		{
+			this.toolbarMode = ToolbarMode.Drawing;
 		}
 
 		private void UnprocessedInput_PointerMoved(InkUnprocessedInput sender, PointerEventArgs args)
@@ -421,7 +486,7 @@ namespace InkToolbarTest
 
 			Canvas.SetLeft(rectangle, boundingRect.X);
 			Canvas.SetTop(rectangle, boundingRect.Y);
-			
+
 			this.SelectionCanvas.Children.Add(rectangle);
 			this.selectionRectangle = boundingRect;
 		}
@@ -448,7 +513,7 @@ namespace InkToolbarTest
 		{
 			if (args.CurrentPoint.Properties.IsRightButtonPressed && args.CurrentPoint.PointerDevice.PointerDeviceType == PointerDeviceType.Mouse)
 			{
-				InkSelectionToolbar.Visibility=Visibility.Visible;
+				this.ShowInkSelectionToolbar();
 				return;
 			}
 
@@ -552,9 +617,99 @@ namespace InkToolbarTest
 			}
 		}
 
+		private void OnInkToolbarAction(object sender, RoutedEventArgs e)
+		{
+			string option = (sender as Button).Name;
+
+			switch (option)
+			{
+				case "Copy":
+				case "Cut":
+					this.copyContainer = new InkStrokeContainer();
+					if (this.renderedStrokes.Any())
+					{
+						foreach (InkStroke stroke in this.renderedStrokes.Where(s => s.Selected))
+						{
+							this.copyContainer.AddStroke(stroke.Clone());
+						}
+
+						this.copyContainer.SelectWithPolyLine(this.lasso.Points);
+						this.copyContainer.CopySelectedToClipboard();
+						if (option == "Cut")
+						{
+							this.OnEraserClicked(sender, null);
+						}
+
+						this.canvas.Invalidate();
+					}
+					break;
+				case "Paste":
+					//Unselects all previously selected areas
+					foreach (InkStrokeContainer container in this.strokes)
+					{
+						container.SelectWithLine(new Point(0, 0), new Point(0, 0));
+					}
+
+					//Fake paste to determine pasted content size
+					InkStrokeContainer pasteFakeContainer = new InkStrokeContainer();
+					Rect pastedContentArea = pasteFakeContainer.PasteFromClipboard(this.toolbarPosition);
+
+					//Paste it ensuring it fits client size
+					InkStrokeContainer pasteContainer = new InkStrokeContainer();
+					Point pastePoint = this.EnsureFit(this.toolbarPosition, pastedContentArea);
+					Rect pastedBoundingRect = pasteContainer.PasteFromClipboard(pastePoint);
+					this.DrawBoundingRect(pastedBoundingRect);
+
+					//Selects pasted ink
+					List<Point> pastedLasso = new List<Point>();
+					pastedLasso.Add(new Point(pastedBoundingRect.X, pastedBoundingRect.Y));
+					pastedLasso.Add(new Point(pastedBoundingRect.X + pastedBoundingRect.Width, pastedBoundingRect.Y));
+					pastedLasso.Add(new Point(pastedBoundingRect.X + pastedBoundingRect.Width, pastedBoundingRect.Y + pastedBoundingRect.Height));
+					pastedLasso.Add(new Point(pastedBoundingRect.X, pastedBoundingRect.Y + pastedBoundingRect.Height));
+					pastedLasso.Add(new Point(pastedBoundingRect.X, pastedBoundingRect.Y));
+					pasteContainer.SelectWithPolyLine(pastedLasso);
+					this.strokes.Add(pasteContainer);
+					this.canvas.Invalidate();
+					//Se lasso matching pasted content
+					this.lasso = new Polyline()
+					{
+						Stroke = new SolidColorBrush(Colors.Blue),
+						StrokeThickness = 1,
+						StrokeDashArray = new DoubleCollection() { 5, 2 },
+					};
+					foreach (Point lassoPoint in pastedLasso)
+					{
+						this.lasso.Points.Add(lassoPoint);
+					}
+					//We move into lasso mode to let user move pasted selection
+					//this.OnLassoChecked(this,null);
+					this.hasPasted = true;
+					break;
+				case "Delete":
+					this.OnEraserClicked(sender, null);
+					break;
+			}
+
+			this.InkSelectionToolbar.Visibility = Visibility.Collapsed;
+		}
+		private Point EnsureFit(Point point, Rect size)
+		{
+			var x = point.X;
+			var y = point.Y;
+			if (x < 0) x = 0;
+			if (y < 0) y = 0;
+			if (x + size.Width > this.ActualWidth - 5) x = this.ActualWidth - size.Width - 5;
+			if (y + size.Height > this.ActualHeight) y = this.ActualHeight - size.Height;
+
+			return new Point(x, y);
+		}
+		#endregion
+
+		#region Stroke drawing
+
 		private void InkPresenter_StrokesCollected(InkPresenter sender, InkStrokesCollectedEventArgs args)
 		{
-			this.pendingDry = _inkSynchronizer.BeginDry();
+			this.pendingDry = this.inkSynchronizer.BeginDry();
 			var container = new InkStrokeContainer();
 			foreach (var stroke in this.pendingDry)
 			{
@@ -576,11 +731,25 @@ namespace InkToolbarTest
 
 			if (this.pendingDry != null && this.deferredDryDelay == 0)
 			{
-				_deferredDryDelay = 1;
+				this.deferredDryDelay = 1;
 				CompositionTarget.Rendering += this.OnDeferEndDry;
 			}
 		}
-		
+
+		private void OnDeferEndDry(object sender, object e)
+		{
+			if (this.deferredDryDelay > 0)
+			{
+				this.deferredDryDelay--;
+			}
+			else
+			{
+				CompositionTarget.Rendering -= this.OnDeferEndDry;
+				this.pendingDry = null;
+				this.inkSynchronizer.EndDry();
+			}
+		}
+		#endregion
 
 		private async void OnShare(object sender, RoutedEventArgs e)
 		{
@@ -630,45 +799,13 @@ namespace InkToolbarTest
 		}
 		#endregion
 
-		private void OnLassoClicked(object sender, RoutedEventArgs e)
-		{
+		
 
-		}
+		
 
-		private void OnInkToolbarAction(object sender, RoutedEventArgs e)
-		{
-			throw new NotImplementedException();
-		}
 
-		private void OnDeferEndDry(object sender, object e)
-		{
-			if (this.deferredDryDelay > 0)
-			{
-				this.deferredDryDelay--;
-			}
-			else
-			{
-				CompositionTarget.Rendering -= this.OnDeferEndDry;
-				this.pendingDry = null;
-				_inkSynchronizer.EndDry();
-			}
-		}
+		
 
-		private void OnLassoChecked(object sender, RoutedEventArgs e)
-		{
-			if (!this.hasPasted)
-			{
-				this.ClearDrawnBoundingRect();
-			}
-			
-
-			this.InkCanvas.InkPresenter.InputProcessingConfiguration.Mode = InkInputProcessingMode.None;
-			this.toolbarMode = ToolbarMode.Lasso;
-		}
-
-		private void OnLassoUnchecked(object sender, RoutedEventArgs e)
-		{
-			this.toolbarMode = ToolbarMode.Drawing;
-		}
+		
 	}
 }

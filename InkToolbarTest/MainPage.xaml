@@ -68,7 +68,9 @@
                 <InkToolbarCustomToolButton Style="{StaticResource ShareButtonStyle}"
                                             Click="OnShare" />
             </InkToolbar>
-            <InkToolbarCustomPenButton Content="L"
+            <InkToolbarCustomPenButton Content=""
+                                       FontFamily="Segoe MDL2 Assets"
+                                       x:Name="LassoButton"
                                        Checked="OnLassoChecked"
                                        Unchecked="OnLassoUnchecked" />
             <StackPanel x:Name="InkSelectionToolbar"
