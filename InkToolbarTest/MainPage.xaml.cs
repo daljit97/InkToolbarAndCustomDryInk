@@ -408,131 +408,95 @@ namespace InkToolbarTest
             this.toolbarMode = ToolbarMode.Drawing;
         }
 
-        CanvasRenderTarget renderTarget = null;
-
-        Rect eraser = new Rect(new Point(0, 0), new Size(0, 0));
-        private void UnprocessedInput_PointerMoved(InkUnprocessedInput sender, PointerEventArgs args)
+        private bool Intersects(Rect rect1, Rect rect2)
         {
+            Rect clone = new Rect(new Point(rect1.X, rect1.Y), new Size(rect1.Width, rect1.Height));
+            clone.Intersect(rect2);
+            return clone != Rect.Empty;
+        }
+
+        CanvasRenderTarget renderTarget = null;
+        object _eraserLock = new { };
+        Rect eraser = new Rect(new Point(0, 0), new Size(0, 0));
+        private async void UnprocessedInput_PointerMoved(InkUnprocessedInput sender, PointerEventArgs args)
+        {
+            System.Diagnostics.Debug.WriteLine(args.CurrentPoint.Position);
+
             switch (this.toolbarMode)
             {
                 case ToolbarMode.Erasing:
                     if (!this.isErasing) return;
-                    //bool invalidate = false;
-
-                    //draw rectange for eraser
-                    eraser = new Rect(args.CurrentPoint.Position, new Size(30, 30));
-
-                    #region try 2
-                    InkStroke newStroke1 = null;
-                    InkStroke newStroke2 = null;
-                    List<InkPoint> newpoints1 = new List<InkPoint>();
-                    List<InkPoint> newpoints2 = new List<InkPoint>();
-                    InkStrokeContainer newContainer1 = new InkStrokeContainer();
-                    InkStrokeContainer newContainer2 = new InkStrokeContainer();
-
-                    InkStrokeBuilder creator = new InkStrokeBuilder();
-                    System.Numerics.Matrix3x2 matr = System.Numerics.Matrix3x2.Identity;
-
-                    foreach (InkStrokeContainer item in this.strokes.ToArray())
+                    lock (_eraserLock)
                     {
-                        Rect rect = item.SelectWithLine(this.lastPoint, args.CurrentPoint.Position);
-                        if (rect.Width == 0 && rect.Height == 0)
+                        eraser = new Rect(args.CurrentPoint.Position, new Size(30, 30));
+
+                        var tempStrokes = new List<InkStrokeContainer>(strokes);
+                        foreach (var strokeContainer in tempStrokes)
                         {
-                            Debug.WriteLine("skipping InkStrokeContainer  from strokes collection");
-                            continue;
-                        }
-
-                        Debug.WriteLine("ciclyng strokes collection");
-                        //Rect rect = item.SelectWithLine(this.lastPoint, args.CurrentPoint.Position);
-                        //if (rect.IsEmpty) continue;
-                        //if (rect.Width * rect.Height > 0)
-                        //{
-
-
-                        var selectedStrokes = item.GetStrokes();
-
-                        foreach (InkStroke stroke in selectedStrokes)
-                        {
-                            if (stroke.Selected == false)
-                                continue;
-
-                            //Debug.WriteLine("ciclyng selectedStrokes");
-
-                            creator.SetDefaultDrawingAttributes(stroke.DrawingAttributes);
-                            bool switchToSecond = false;
-
-                            foreach (InkPoint point in stroke.GetInkPoints())
+                            if (Intersects(eraser, strokeContainer.BoundingRect))
                             {
-                                //Debug.WriteLine("ciclyng GetInkPoints");
-
-                                if (eraser.Contains(point.Position) == false)
+                                var innerStrokes = new List<InkStroke>(strokeContainer.GetStrokes());
+                                for (var i = 0; i < innerStrokes.Count; i += 1)
                                 {
-                                    if (switchToSecond == false)
-                                        newpoints1.Add(point);
-                                    else
-                                        newpoints2.Add(point);
-                                }
-                                else
-                                {
-                                    switchToSecond = true;
-                                }
+                                    var stroke = innerStrokes[i];
 
-                            }
+                                    if (Intersects(eraser, stroke.BoundingRect))
+                                    {
+                                        var inkPoints = new List<InkPoint>(stroke.GetInkPoints());
 
-                            if (newpoints1.Count > 0)
-                            {
-                                newStroke1 = creator.CreateStrokeFromInkPoints(newpoints1, matr);
+                                        for (int pointIndex = 0; pointIndex < inkPoints.Count; pointIndex++)
+                                        {
+                                            var inkPoint = inkPoints[pointIndex];
 
-                                if (newStroke1 != null)
-                                {
-                                    if (newContainer1 == null)
-                                        newContainer1 = new InkStrokeContainer();
-                                    newContainer1.AddStroke(newStroke1);
-                                }
-                            }
+                                            if (eraser.Contains(inkPoint.Position))
+                                            {
+                                                stroke.Selected = true;
 
-                            if (newpoints2.Count > 0)
-                            {
-                                newStroke2 = creator.CreateStrokeFromInkPoints(newpoints2, matr);
-                                if (newStroke2 != null)
-                                {
-                                    if (newContainer2 == null)
-                                        newContainer2 = new InkStrokeContainer();
-                                    newContainer2.AddStroke(newStroke2);
+                                                if (pointIndex > 0)
+                                                {
+                                                    var points = inkPoints.GetRange(0, pointIndex);
+                                                    var newStroke = new InkStrokeBuilder().CreateStrokeFromInkPoints(points, Matrix3x2.Identity);
+                                                    newStroke.DrawingAttributes = stroke.DrawingAttributes;
+                                                    newStroke.PointTransform = stroke.PointTransform;
+                                                    strokeContainer.AddStroke(newStroke);
+                                                }
+                                                break;
+                                            }
+                                        }
+
+                                        for (int pointIndex = inkPoints.Count - 1; pointIndex >= 0; pointIndex--)
+                                        {
+                                            var inkPoint = inkPoints[pointIndex];
+
+                                            if (eraser.Contains(inkPoint.Position))
+                                            {
+                                                stroke.Selected = true;
+
+                                                if (pointIndex < inkPoints.Count - 1)
+                                                {
+                                                    var points = inkPoints.GetRange(pointIndex + 1, inkPoints.Count - (pointIndex + 1));
+                                                    var newStroke = new InkStrokeBuilder().CreateStrokeFromInkPoints(points, Matrix3x2.Identity);
+                                                    newStroke.DrawingAttributes = stroke.DrawingAttributes;
+                                                    newStroke.PointTransform = stroke.PointTransform;
+                                                    strokeContainer.AddStroke(newStroke);
+                                                }
+                                                break;
+                                            }
+                                        }
+
+                                        if (stroke.Selected)
+                                        {
+                                            strokeContainer.DeleteSelected();
+                                        }
+                                    }
                                 }
                             }
                         }
 
-                        this.strokes.Remove(item);
-
-
-                        if (newContainer1 != null)
-                            this.strokes.Add(newContainer1);
-                        if (newContainer2 != null)
-                            this.strokes.Add(newContainer2);
-                        //canvas.Invalidate();
-                        //invalidate = true;
-
-                        //}
+                        this.lastPoint = args.CurrentPoint.Position;
+                        args.Handled = true;
+                        canvas.Invalidate();
                     }
-
-
-                    newStroke1 = null;
-                    newStroke2 = null;
-                    newpoints1.Clear();
-                    newpoints2.Clear();
-                    newContainer1 = new InkStrokeContainer();
-                    newContainer2 = new InkStrokeContainer();
-                    #endregion
-
-                    this.lastPoint = args.CurrentPoint.Position;
-                    args.Handled = true;
-                    //if (invalidate)
-                    //{
-                    //	this.canvas.Invalidate();
-                    //}
-                    //eraser = Rect.Empty;
-                    canvas.Invalidate();
                     break;
                 case ToolbarMode.Lasso:
                     if (this.isBoundRect)
@@ -626,6 +590,7 @@ namespace InkToolbarTest
                     this.lastPoint = args.CurrentPoint.Position;
                     args.Handled = true;
                     this.isErasing = true;
+                    eraser = new Rect(args.CurrentPoint.Position, new Size(30, 30));
                     break;
                 case ToolbarMode.Lasso:
                     if (this.selectionRectangle != null)
@@ -681,6 +646,7 @@ namespace InkToolbarTest
                 case ToolbarMode.Erasing:
                     if (this.isErasing) args.Handled = true;
                     this.isErasing = false;
+                    eraser = new Rect(args.CurrentPoint.Position, new Size(0, 0));
                     break;
                 case ToolbarMode.Lasso:
                     if (this.isSelectionDragging)
@@ -904,14 +870,5 @@ namespace InkToolbarTest
             }
         }
         #endregion
-
-
-
-
-
-
-
-
-
     }
 }
