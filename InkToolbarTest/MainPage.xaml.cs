@@ -415,13 +415,10 @@ namespace InkToolbarTest
             return clone != Rect.Empty;
         }
 
-        CanvasRenderTarget renderTarget = null;
         object _eraserLock = new { };
         Rect eraser = new Rect(new Point(0, 0), new Size(0, 0));
-        private async void UnprocessedInput_PointerMoved(InkUnprocessedInput sender, PointerEventArgs args)
+        private void UnprocessedInput_PointerMoved(InkUnprocessedInput sender, PointerEventArgs args)
         {
-            System.Diagnostics.Debug.WriteLine(args.CurrentPoint.Position);
-
             switch (this.toolbarMode)
             {
                 case ToolbarMode.Erasing:
