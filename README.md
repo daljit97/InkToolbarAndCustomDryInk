@@ -26,11 +26,11 @@ That said, you can think of the algorithm as being split into the following part
 ## Erase Path Model
 The model of the eraser path we use internally is shown below.  Using a Rectangular eraser shape the path swept by the eraser from time t-1 to time t defines a hexagonal contour as shown below (for a perfectly vertical or horizontal path it would be rectangular).  The strokes that intersect with this path are those that are “hit” by the eraser. 
 
-Image goes here
+![eraser1](https://github.com/shweaver-MSFT/InkToolbarAndCustomDryInk/blob/point-eraser/eraser1.png)
 
 An alternative model that is simpler and can be used is something like the picture below that consists of a sequence of interpolated partially overlapping rectangles.  The main disadvantage of this approach is that it results in a stair-step pattern in the erase – an effect that is clear when erasing a group of strokes.  Another disadvantage is that the number of operations required goes up as the number of interpolated rectangles increases; the number of interpolated rectangles increases as the speed of the eraser increases, the eraser size decreases, and the degree of desired overlap increases.  On the other hand it works well enough in most cases and you get to use simple axis-aligned rectangles for your hit testing and intersection finding.
 
-Image goes here
+![eraser2](https://github.com/shweaver-MSFT/InkToolbarAndCustomDryInk/blob/point-eraser/eraser2.png)
 
 With some work, it is possible to do better than these eraser path models;  for example a smooth interpolated path between eraser input points can be generated rather than simple using line segments as is done above.  You could also have a model that changes the size of the eraser in response to pressure or velocity.
 
